@@ -2,10 +2,9 @@ pragma solidity ^0.4.22;
 
 /**
  * @title SafeMath
- * @dev Math operations with safety checks that throw on error
+ * @dev   Math operations with safety checks that throw on error
  */
 library SafeMath {
-
   /**
   * @dev Multiplies two numbers, throws on overflow.
   */
@@ -17,7 +16,6 @@ library SafeMath {
     assert(c / a == b);
     return c;
   }
-
   /**
   * @dev Integer division of two numbers, truncating the quotient.
   */
@@ -47,35 +45,6 @@ library SafeMath {
 }
 
 /*
-*   @dev    using IPFS, save some documents
-*/
-contract DocumentRegistry {
-    struct Document {
-        string hash;
-        uint256 dateAdded;
-    }
-    Document[] private documents;
-    address owner;
-    modifier onlyOwner() {
-        require(owner == msg.sender);
-        _;
-    }
-    constructor() public {
-        owner == msg.sender;
-    }
-    function add(string hash) public onlyOwner returns(uint dateAdded) {
-        dateAdded = block.timestamp;
-        documents.push(Document(hash, dateAdded));
-    }
-    function getDocmentsCount() public view returns (uint length) {
-        length = documents.length;
-    }
-    function getDocments(uint index) public view returns(string, uint) { 
-        Document memory document = documents[index];
-        return (document.hash, document.dateAdded);
-    }
-}
-/*
 *   @title  CompanyShares
 *   @dev    Issue, buy, sell and transfer of stocks in a company
 */
@@ -84,9 +53,9 @@ contract CompanyShares {
     using SafeMath for uint256;
     
     mapping (address => uint256) shareholderToShares;
-    mapping (address => bool) approvals;        // owner's approval of withdraw
+    mapping (address => bool) approvals;   // owner's approval of withdraw
     
-    uint32        sharePrice;     // price per a stock
+    uint32      sharePrice;     // price per a stock
     address[]   shareholders;   // addresses of stockholders
     uint256     balance;        // to deposit some asset by owner
     address     owner;          // to save the owner of this contract
@@ -132,7 +101,8 @@ contract CompanyShares {
         require(msg.value >= amount.mul(sharePrice));
         owner.transfer(amount.mul(sharePrice));
         shareholderToShares[owner] = shareholderToShares[owner].sub(amount);
-         
+        shareholders.push(msg.sender);  // check duplicate
+        
         //check if there is duplicate address
         for (uint i = 0; i < shareholders.length; i++)
             if (shareholders[i] == msg.sender) break;
@@ -146,7 +116,7 @@ contract CompanyShares {
     function approve(address _to, bool yesNo) public onlyOwner {
         approvals[_to] = yesNo;
     } 
-    /*  @dev    The buyer can cancel its buying of stocks
+    /*  @dev    The buyer can cancel its buying of stocks if owner allows it
     */
     function withdraw() public { 
         require(approvals[msg.sender]);
@@ -171,13 +141,14 @@ contract CompanyShares {
         require(shareholderToShares[msg.sender] >= shares);
         shareholderToShares[_to] = shares;
         shareholderToShares[msg.sender] = shareholderToShares[msg.sender].sub(shares);
+        shareholders.push(_to);
     }
 }
 /*
-*   @title  VotingOnAgenda
+*   @title  Voting on Agenda
 *   @dev    Voting system to handle a agneder suggested in a stockholder's meeting
 */
-contract VotingOnAgenda is CompanyShares {
+contract VotingOnAgenda is CompanyShares {//, DocumentRegistry {
     // to prevent some possible problems in handling integer data
     using SafeMath for uint32;  
     using SafeMath for uint256; 
@@ -188,6 +159,7 @@ contract VotingOnAgenda is CompanyShares {
     
     //mapping (address => uint256) shareholderToVotingCount;
     mapping (address => uint256) votingShares;
+    mapping (uint8 => uint256) agendaVotes;
      
     // Some agenda to be discussed and decided by voting in the meeting
     struct Agenda {
@@ -198,18 +170,19 @@ contract VotingOnAgenda is CompanyShares {
     }
     Agenda agenda;
     
-    uint256[] agendaVotes;
-    
+    struct Document {
+        string hash;
+        uint256 dateAdded;
+    }
+    Document[] private documents;
     modifier withinDeadLine () {
         require(agenda.startTime <= now);
         require(agenda.endTime >= now);
         _;
     }
+    // stockholders or someone committed by the stockholders
     modifier onlyShareholders() {
-        for (uint i = 0; i < shareholders.length; i++ ) {
-            if (msg.sender == shareholders[i]) break;
-        }
-        require (i < shareholders.length);
+        require(votingShares[msg.sender] > 0);
         _;
     }
 	// call inheritance constructor
@@ -220,7 +193,7 @@ contract VotingOnAgenda is CompanyShares {
     function registerAgenda(string _agendaContents, uint256 duration, 
                                 uint8 _noOfOptions) public onlyOwner {
          agenda.contents = _agendaContents;
-         agenda.startTime = block.timestamp; //now;
+         agenda.startTime = now;
          agenda.endTime = now + duration*3600*1000;
          agenda.noOfOptions = _noOfOptions;
 		 
@@ -229,13 +202,14 @@ contract VotingOnAgenda is CompanyShares {
          for (uint i = 0; i < shareholders.length; i++) {
              votingShares[shareholders[i]] = shareholderToShares[shareholders[i]];
          }
+         for (uint8 j = 1; j <= _noOfOptions; j++)  agendaVotes[j] = 0;
+         
          emit AgendaSetup(_agendaContents, agenda.startTime, agenda.endTime, _noOfOptions);
     }
-    
     /*
     *  @dev Below functions are for only viewing the current status
     */
-    function getAgendaVotingVotes(uint index) view public returns (uint256) {
+    function getAgendaVotingVotes(uint8 index) view public returns (uint256) {
         return agendaVotes[index];
     }
     function getAgendaContents() public view returns(string) {
@@ -251,17 +225,17 @@ contract VotingOnAgenda is CompanyShares {
     *  @dev Anybody can participate in the voting if he or she has some 
     *       voting shares
     */
-    function vote(uint32 index, uint32 sharesToVote) public onlyShareholders withinDeadLine {
+    function vote(uint8 index, uint32 sharesToVote) public onlyShareholders withinDeadLine {
         require(index >= 0);
-        require(index < agendaVotes.length);
-        require(sharesToVote <= shareholderToShares[msg.sender]);
-        agendaVotes[index]++;
-        shareholderToShares[msg.sender] = shareholderToShares[msg.sender].sub(sharesToVote);
+        require(index < agenda.noOfOptions);
+        require(sharesToVote <= votingShares[msg.sender]);
+        agendaVotes[index] = agendaVotes[index].add(sharesToVote);
+        votingShares[msg.sender] = votingShares[msg.sender].sub(sharesToVote);
         emit AgendaVote(msg.sender, now, sharesToVote);
     }
     /*
     *  @dev Shareholders can yield their voting shares to other address
-    *       only between startTime  and endTime
+    *       only between startTime and endTime
     */
     function transferVotingShares(address _to, uint256 shares) public withinDeadLine {
         require(votingShares[msg.sender] >= shares);
@@ -270,10 +244,17 @@ contract VotingOnAgenda is CompanyShares {
         emit TransferVotingShares(_to, shares, now);
     }
     /*
-    *   @dev save the minutes from Shareholders' meeting in IPFS
+    *   @dev save the minutes of Shareholders' meeting in IPFS
+    *   and recover by anybody
     */
     function saveDocument(string hash) public onlyOwner {
-        DocumentRegistry document = new DocumentRegistry();
-        document.add(hash);
+        documents.push(Document(hash, now));
+    }
+    function getDocumentsCount() public view returns (uint length) {
+        length = documents.length;
+    }
+    function getDocuments(uint index) public view returns(string, uint) { 
+        Document memory document = documents[index];
+        return (document.hash, document.dateAdded);
     }
 }
