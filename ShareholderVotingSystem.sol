@@ -25,7 +25,6 @@ library SafeMath {
     // assert(a == b * c + a % b); // There is no case in which this doesn't hold
     return c;
   }
-
   /**
   * @dev Subtracts two numbers, throws on overflow (i.e. if subtrahend is greater than minuend).
   */
@@ -33,7 +32,6 @@ library SafeMath {
     assert(b <= a);
     return a - b;
   }
-
   /**
   * @dev Adds two numbers, throws on overflow.
   */
@@ -43,7 +41,6 @@ library SafeMath {
     return c;
   }
 }
-
 /*
 *   @title  CompanyShares
 *   @dev    Issue, buy, sell and transfer of stocks in a company
@@ -146,9 +143,10 @@ contract CompanyShares {
 }
 /*
 *   @title  Voting on Agenda
-*   @dev    Voting system to handle a agneder suggested in a stockholder's meeting
+*   @dev    Voting system to handle a agender suggested in a stockholder's meeting
+*           and save the minutes which describes the shareholder's meeting
 */
-contract VotingOnAgenda is CompanyShares {//, DocumentRegistry {
+contract VotingOnAgenda is CompanyShares {
     // to prevent some possible problems in handling integer data
     using SafeMath for uint32;  
     using SafeMath for uint256; 
@@ -157,45 +155,47 @@ contract VotingOnAgenda is CompanyShares {//, DocumentRegistry {
     event AgendaVote(address voter, uint256 votingTime, uint256 sharesToVote);
     event TransferVotingShares(address to, uint256 shares, uint256 time);
     
-    //mapping (address => uint256) shareholderToVotingCount;
     mapping (address => uint256) votingShares;
-    mapping (uint8 => uint256) agendaVotes;
+    mapping (uint8 => uint256)   agendaVotes;
      
     // Some agenda to be discussed and decided by voting in the meeting
     struct Agenda {
-        string contents; 
+        string  contents;  // contains the subject to be decided and its options 
         uint256 startTime;
         uint256 endTime;
-        uint8 noOfOptions;
+        uint8   noOfOptions;
     }
-    Agenda agenda;
+    Agenda agenda; // at present it is one but it can be array if there are many agenda
     
     struct Document {
         string hash;
         uint256 dateAdded;
     }
     Document[] private documents;
+	
+	// describes the time to be valid for voting
     modifier withinDeadLine () {
         require(agenda.startTime <= now);
         require(agenda.endTime >= now);
         _;
     }
-    // stockholders or someone committed by the stockholders
+    // stockholders or someone who are committed by the stockholders
     modifier onlyShareholders() {
         require(votingShares[msg.sender] > 0);
         _;
     }
-	// call inheritance constructor
+	// to inherit from ComapayShares constructor
 	constructor(uint256 supply, uint32 price) CompanyShares(supply, price) public {}
+	
     /*
     *   @dev Starting the processing of a agenda, set up inital data
     */
-    function registerAgenda(string _agendaContents, uint256 duration, 
-                                uint8 _noOfOptions) public onlyOwner {
+    function registerAgenda(string _agendaContents, uint256 duration, uint8 _noOfOptions) 
+												public onlyOwner {
          agenda.contents = _agendaContents;
          agenda.startTime = now;
-         agenda.endTime = now + duration*3600*1000;
-         agenda.noOfOptions = _noOfOptions;
+         agenda.endTime = now + duration*3600*1000;  // duration is hour
+         agenda.noOfOptions = _noOfOptions;  	// items to be slected by the voters
 		 
          // Copy from shareholderToShares to votingShares
          // Initially, the number of shares equals to the number of voting shares
@@ -235,7 +235,7 @@ contract VotingOnAgenda is CompanyShares {//, DocumentRegistry {
     }
     /*
     *  @dev Shareholders can yield their voting shares to other address
-    *       only between startTime and endTime
+    *       valid only if doing between startTime and endTime
     */
     function transferVotingShares(address _to, uint256 shares) public withinDeadLine {
         require(votingShares[msg.sender] >= shares);
@@ -244,8 +244,9 @@ contract VotingOnAgenda is CompanyShares {//, DocumentRegistry {
         emit TransferVotingShares(_to, shares, now);
     }
     /*
-    *   @dev save the minutes of Shareholders' meeting in IPFS
-    *   and recover by anybody
+    *   @dev Save the minutes regarding Shareholders' meeting in IPFS
+    *   and it can be read by anybody 
+	*   It is to prevent any possible disputes among shareholders
     */
     function saveDocument(string hash) public onlyOwner {
         documents.push(Document(hash, now));
