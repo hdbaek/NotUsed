@@ -76,8 +76,9 @@ contract CompanyShares {
     /*
     *   @dev    View the current status
     */
-    function getShareholder() view public returns(address[]) {
-        return shareholders;
+    function getShareholder(uint256 index) view public returns(address, uint256) {
+        if (index >= shareholders.length) return (0, 0);
+        return (shareholders[index], shareholderToShares[shareholders[index]]);
     }
     function getShareByAddress(address _address) view public returns(uint256) {
         return shareholderToShares[_address];
@@ -93,12 +94,11 @@ contract CompanyShares {
     /*
     *   @dev    Anybody can buy stocks from the original owner
     */
-    function buyShares(uint256 amount) public payable {
+    function buyShares(uint256 amount) public payable {  // amount:wei
         require(shareholderToShares[owner] >= amount);
         require(msg.value >= amount.mul(sharePrice));
         owner.transfer(amount.mul(sharePrice));
         shareholderToShares[owner] = shareholderToShares[owner].sub(amount);
-        shareholders.push(msg.sender);  // check duplicate
         
         //check if there is duplicate address
         for (uint i = 0; i < shareholders.length; i++)
@@ -118,7 +118,7 @@ contract CompanyShares {
     function withdraw() public { 
         require(approvals[msg.sender]);
         uint256 amount = shareholderToShares[msg.sender].mul(sharePrice);
-        require(balance >= amount);
+        if (balance < amount) return;
         shareholderToShares[owner] = 
             shareholderToShares[owner].add(shareholderToShares[msg.sender]);
         msg.sender.transfer(amount);
@@ -135,10 +135,13 @@ contract CompanyShares {
     *           without any condition
     */
     function transferShares(address _to, uint256 shares) public {
-        require(shareholderToShares[msg.sender] >= shares);
-        shareholderToShares[_to] = shares;
+        if (shareholderToShares[msg.sender] < shares) return;
+        shareholderToShares[_to] = shareholderToShares[_to].add(shares);
         shareholderToShares[msg.sender] = shareholderToShares[msg.sender].sub(shares);
-        shareholders.push(_to);
+        //check if there is duplicate address
+        for (uint i = 0; i < shareholders.length; i++)
+            if (shareholders[i] == _to) break;
+        if (i == shareholders.length) shareholders.push(_to);
     }
 }
 /*
@@ -157,7 +160,9 @@ contract VotingOnAgenda is CompanyShares {
     
     mapping (address => uint256) votingShares;
     mapping (uint8 => uint256)   agendaVotes;
-     
+	
+    address[]   actualVoters;   // addresses who have voting rights
+	
     // Some agenda to be discussed and decided by voting in the meeting
     struct Agenda {
         string  contents;  // contains the subject to be decided and its options 
@@ -192,17 +197,25 @@ contract VotingOnAgenda is CompanyShares {
     */
     function registerAgenda(string _agendaContents, uint256 duration, uint8 _noOfOptions) 
 												public onlyOwner {
+         // clear the information of voters and their shares and previous voting result
+         for (uint i = 0; i < actualVoters.length; i++) {
+             votingShares[actualVoters[i]] = 0;
+         }
+         actualVoters.length = 0;
+         for (uint8 j = 1; j <= agenda.noOfOptions; j++)  agendaVotes[j] = 0;
+         
          agenda.contents = _agendaContents;
          agenda.startTime = now;
          agenda.endTime = now + duration*3600*1000;  // duration is hour
          agenda.noOfOptions = _noOfOptions;  	// items to be slected by the voters
-		 
+         
          // Copy from shareholderToShares to votingShares
-         // Initially, the number of shares equals to the number of voting shares
-         for (uint i = 0; i < shareholders.length; i++) {
+         // Initially, the number of shares equals to the number of voting share
+         for (i = 0; i < shareholders.length; i++) {
              votingShares[shareholders[i]] = shareholderToShares[shareholders[i]];
+			 actualVoters.push(shareholders[i]);
          }
-         for (uint8 j = 1; j <= _noOfOptions; j++)  agendaVotes[j] = 0;
+         for (j = 1; j <= _noOfOptions; j++)  agendaVotes[j] = 0;
          
          emit AgendaSetup(_agendaContents, agenda.startTime, agenda.endTime, _noOfOptions);
     }
@@ -221,14 +234,17 @@ contract VotingOnAgenda is CompanyShares {
     function getEndTime() public view returns(uint256) {
         return agenda.endTime;
     }
+	function getActualVoter(uint index) public view returns(address, uint256) {
+		if (index >= actualVoters.length) return (0, 0);
+		return (actualVoters[index], votingShares[actualVoters[index]]);
+	}
     /*
     *  @dev Anybody can participate in the voting if he or she has some 
     *       voting shares
     */
     function vote(uint8 index, uint32 sharesToVote) public onlyShareholders withinDeadLine {
-        require(index >= 0);
-        require(index < agenda.noOfOptions);
-        require(sharesToVote <= votingShares[msg.sender]);
+        if (index <= 0 || index > agenda.noOfOptions) return;
+        if (sharesToVote > votingShares[msg.sender]) return;
         agendaVotes[index] = agendaVotes[index].add(sharesToVote);
         votingShares[msg.sender] = votingShares[msg.sender].sub(sharesToVote);
         emit AgendaVote(msg.sender, now, sharesToVote);
@@ -238,9 +254,13 @@ contract VotingOnAgenda is CompanyShares {
     *       valid only if doing between startTime and endTime
     */
     function transferVotingShares(address _to, uint256 shares) public withinDeadLine {
-        require(votingShares[msg.sender] >= shares);
-        votingShares[_to] = shares;
+        if (votingShares[msg.sender] < shares) return;
+        votingShares[_to] = votingShares[_to].add(shares);
         votingShares[msg.sender] = votingShares[msg.sender].sub(shares);
+		for (uint i = 0; i < actualVoters.length; i++)
+			if(actualVoters[i] == _to) break;
+		if(i == actualVoters.length) actualVoters.push(_to);
+		
         emit TransferVotingShares(_to, shares, now);
     }
     /*
